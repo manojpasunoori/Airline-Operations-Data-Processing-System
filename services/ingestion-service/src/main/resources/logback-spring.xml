@@ -1,0 +1,17 @@
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <customFields>{"service":"${APP_NAME:-ingestion-service}","env":"${APP_ENV:-local}"}</customFields>
+
+      <includeMdcKeyName>correlationId</includeMdcKeyName>
+      <includeMdcKeyName>requestId</includeMdcKeyName>
+      <includeMdcKeyName>clientIp</includeMdcKeyName>
+      <includeMdcKeyName>httpMethod</includeMdcKeyName>
+      <includeMdcKeyName>path</includeMdcKeyName>
+    </encoder>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>

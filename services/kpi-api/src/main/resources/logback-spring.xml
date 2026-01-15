@@ -1,0 +1,19 @@
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+      <!-- Adds constant fields -->
+      <customFields>{"service":"${APP_NAME:-unknown}","env":"${APP_ENV:-local}"}</customFields>
+
+      <!-- Pull these from MDC (set by our filter below) -->
+      <includeMdcKeyName>correlationId</includeMdcKeyName>
+      <includeMdcKeyName>requestId</includeMdcKeyName>
+      <includeMdcKeyName>clientIp</includeMdcKeyName>
+      <includeMdcKeyName>httpMethod</includeMdcKeyName>
+      <includeMdcKeyName>path</includeMdcKeyName>
+    </encoder>
+  </appender>
+
+  <root level="${LOG_LEVEL_ROOT:-INFO}">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>

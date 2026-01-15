@@ -1,18 +1,38 @@
 import os
+import sys
+import time
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import SQLAlchemyError
 
-# 1) Build DB connection string from environment variables
-def db_url():
-    return (
-        f"postgresql+psycopg2://{os.environ['DB_USER']}:{os.environ['DB_PASS']}"
-        f"@{os.environ['DB_HOST']}:{os.environ['DB_PORT']}/{os.environ['DB_NAME']}"
-    )
+from logging_utils import setup_logger
 
-engine = create_engine(db_url())
+log, jobRunId = setup_logger()
+t0 = time.time()
 
-# 2) Create/refresh clean fact table from staging
-def refresh_fact(conn):
-    conn.execute(text("""
+
+def require_env(name: str) -> str:
+    val = os.getenv(name)
+    if not val:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return val
+
+
+def db_url() -> str:
+    # Build DB connection string from environment variables
+    user = require_env("DB_USER")
+    password = require_env("DB_PASS")
+    host = require_env("DB_HOST")
+    port = require_env("DB_PORT")
+    db = require_env("DB_NAME")
+    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db}"
+
+
+def refresh_fact(conn) -> int:
+    """
+    Upsert into fact_flight_leg from stg_flights.
+    Returns affected row count if available (may be -1 depending on driver).
+    """
+    sql = text("""
         INSERT INTO fact_flight_leg (
           flight_date, airline, flight_num, origin, destination,
           sched_dep_ts, actual_dep_ts, sched_arr_ts, actual_arr_ts,
@@ -38,13 +58,14 @@ def refresh_fact(conn):
           actual_arr_ts = EXCLUDED.actual_arr_ts,
           dep_delay_min = EXCLUDED.dep_delay_min,
           arr_delay_min = EXCLUDED.arr_delay_min
-    """))
+    """)
+    res = conn.execute(sql)
+    return getattr(res, "rowcount", -1)
 
-# 3) Compute KPI tables (fast reads for API/dashboard)
-def refresh_kpis(conn):
-    # KPI 1: Delay by route/day
+
+def refresh_kpi_delay_by_route_day(conn) -> int:
     conn.execute(text("TRUNCATE kpi_delay_by_route_day"))
-    conn.execute(text("""
+    sql = text("""
       INSERT INTO kpi_delay_by_route_day (flight_date, route, flights, avg_dep_delay_min, p90_dep_delay_min)
       SELECT
         flight_date,
@@ -54,11 +75,14 @@ def refresh_kpis(conn):
         ROUND(PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY COALESCE(dep_delay_min,0))::numeric, 2) AS p90_dep_delay_min
       FROM fact_flight_leg
       GROUP BY flight_date, origin, destination
-    """))
+    """)
+    res = conn.execute(sql)
+    return getattr(res, "rowcount", -1)
 
-    # KPI 2: On-time % by airport/day (<= 15 min dep delay)
+
+def refresh_kpi_on_time_by_airport_day(conn) -> int:
     conn.execute(text("TRUNCATE kpi_on_time_by_airport_day"))
-    conn.execute(text("""
+    sql = text("""
       INSERT INTO kpi_on_time_by_airport_day (flight_date, airport, flights, on_time_pct)
       SELECT
         flight_date,
@@ -71,15 +95,78 @@ def refresh_kpis(conn):
         ) AS on_time_pct
       FROM fact_flight_leg
       GROUP BY flight_date, origin
-    """))
+    """)
+    res = conn.execute(sql)
+    return getattr(res, "rowcount", -1)
 
-def main():
-    # engine.begin() makes a transaction; it auto-commits if success, rolls back if failure.
-    with engine.begin() as conn:
-        refresh_fact(conn)
-        refresh_kpis(conn)
 
-    print("✅ Transform complete: fact_flight_leg + KPI tables refreshed.")
+def main() -> int:
+    log.info("transform_start", extra={"jobRunId": jobRunId})
+
+    try:
+        engine = create_engine(db_url(), pool_pre_ping=True)
+
+        # engine.begin() starts a transaction; commits on success, rolls back on error.
+        with engine.begin() as conn:
+
+            # Step: refresh_fact
+            s = time.time()
+            log.info("step_start", extra={"jobRunId": jobRunId, "step": "refresh_fact"})
+            fact_rows = refresh_fact(conn)
+            log.info(
+                "step_end",
+                extra={
+                    "jobRunId": jobRunId,
+                    "step": "refresh_fact",
+                    "rows": fact_rows,
+                    "durationMs": int((time.time() - s) * 1000),
+                },
+            )
+
+            # Step: kpi_delay_by_route_day
+            s = time.time()
+            log.info("step_start", extra={"jobRunId": jobRunId, "step": "kpi_delay_by_route_day"})
+            kpi1_rows = refresh_kpi_delay_by_route_day(conn)
+            log.info(
+                "step_end",
+                extra={
+                    "jobRunId": jobRunId,
+                    "step": "kpi_delay_by_route_day",
+                    "rows": kpi1_rows,
+                    "durationMs": int((time.time() - s) * 1000),
+                },
+            )
+
+            # Step: kpi_on_time_by_airport_day
+            s = time.time()
+            log.info("step_start", extra={"jobRunId": jobRunId, "step": "kpi_on_time_by_airport_day"})
+            kpi2_rows = refresh_kpi_on_time_by_airport_day(conn)
+            log.info(
+                "step_end",
+                extra={
+                    "jobRunId": jobRunId,
+                    "step": "kpi_on_time_by_airport_day",
+                    "rows": kpi2_rows,
+                    "durationMs": int((time.time() - s) * 1000),
+                },
+            )
+
+        log.info("transform_success", extra={"jobRunId": jobRunId})
+        return 0
+
+    except (RuntimeError, SQLAlchemyError, Exception):
+        # Logs exception stack trace in JSON
+        log.exception("transform_failed", extra={"jobRunId": jobRunId})
+        return 1
+
+    finally:
+        log.info(
+            "transform_end",
+            extra={"jobRunId": jobRunId, "durationMs": int((time.time() - t0) * 1000)},
+        )
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
+
+

@@ -16,6 +16,9 @@ services:
     build: ./services/transform-service
     container_name: ops-transform
     environment:
+      APP_NAME: transform-service
+      APP_ENV: local
+      LOG_LEVEL_ROOT: INFO
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: opsdb
@@ -28,6 +31,9 @@ services:
     build: ./services/kpi-api
     container_name: ops-kpi-api
     environment:
+      APP_NAME: kpi-api
+      APP_ENV: local
+      LOG_LEVEL_ROOT: INFO
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: opsdb
@@ -42,6 +48,9 @@ services:
     build: ./services/ingestion-service
     container_name: ops-ingestion
     environment:
+      APP_NAME: ingestion-service
+      APP_ENV: local
+      LOG_LEVEL_ROOT: INFO
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: opsdb
