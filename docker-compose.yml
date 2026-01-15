@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ops-postgres
+    environment:
+      POSTGRES_USER: ops
+      POSTGRES_PASSWORD: ops
+      POSTGRES_DB: opsdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  transform:
+    profiles: ["jobs"]
+    build: ./services/transform-service
+    container_name: ops-transform
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: opsdb
+      DB_USER: ops
+      DB_PASS: ops
+    depends_on:
+      - postgres
+
+  kpi-api:
+    build: ./services/kpi-api
+    container_name: ops-kpi-api
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: opsdb
+      DB_USER: ops
+      DB_PASS: ops
+    depends_on:
+      - postgres
+    ports:
+      - "8080:8080"
+
+  ingestion-service:
+    build: ./services/ingestion-service
+    container_name: ops-ingestion
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: opsdb
+      DB_USER: ops
+      DB_PASS: ops
+    depends_on:
+      - postgres
+    ports:
+      - "8081:8081"

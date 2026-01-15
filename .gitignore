@@ -1,0 +1,31 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Java / Maven
+**/target/
+**/*.log
+.mvn/
+.mvnw
+.mvnw.cmd
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Env / Secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Docker
+**/.dockerignore
+
+# Misc
+*.iml
